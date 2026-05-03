@@ -1,16 +1,14 @@
-name: Build KernelSU for RMX3461
+name: Build SukiSU for RMX3461 (Q3s)
 
 on:
-  push:
-    branches: [ main ]
   workflow_dispatch:
 
 env:
   KERNEL_SOURCE: https://github.com/realme-kernel-opensource/realme_GTmaster_Q3s_Q3t_9-5G-Speed-AndroidT-kernel-source
   KERNEL_SOURCE_BRANCH: master
-  KERNEL_CONFIG: lahaina_defconfig
+  KERNEL_CONFIG: taro_defconfig  # 修正为778G的正确代号
   ARCH: arm64
-  CLANG_VERSION: r416183b
+  CLANG_VERSION: r450784e
 
 jobs:
   build:
@@ -23,46 +21,46 @@ jobs:
     - name: Setup build environment
       run: |
         sudo apt-get update
-        sudo apt-get install -y git ccache automake flex lzop bison gperf build-essential zip curl zlib1g-dev g++-multilib libxml2-utils bzip2 libbz2-dev libbz2-1.0 libghc-bzlib-dev squashfs-tools pngcrush schedtool dpkg-dev liblz4-tool make optipng maven libssl-dev pwgen libswitch-perl policycoreutils minicom libxml-sax-base-perl libxml-simple-perl bc libc6-dev-i386 lib32ncurses5-dev libx11-dev lib32z-dev libgl1-mesa-dev xsltproc unzip device-tree-compiler python2 python3 cpio
+        sudo apt-get install -y git ccache automake flex lzop bison gperf build-essential zip curl zlib1g-dev g++-multilib libxml2-utils bzip2 squashfs-tools pngcrush schedtool dpkg-dev liblz4-tool make optipng maven libssl-dev pwgen libswitch-perl policycoreutils minicom libxml-sax-base-perl libxml-simple-perl bc libc6-dev-i386 lib32ncurses-dev libx11-dev lib32z1-dev libgl1-mesa-dev xsltproc unzip device-tree-compiler python3 python3-distutils cpio
 
     - name: Download Clang
       run: |
         mkdir -p clang
         cd clang
-        wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android12-release/clang-${{ env.CLANG_VERSION }}.tar.gz
-        tar -xzf clang-${{ env.CLANG_VERSION }}.tar.gz
+        wget -q https://github.com/LineageOS/android_prebuilts_clang_kernel/releases/download/clang-${{ env.CLANG_VERSION }}/clang-${{ env.CLANG_VERSION }}.tar.gz
+        tar -xzf clang-${{ env.CLANG_VERSION }}.tar.gz --strip-components=1
         cd ..
 
     - name: Download GCC ARM64
       run: |
         mkdir -p gcc64
         cd gcc64
-        wget -q https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/+archive/refs/heads/android12-release.tar.gz
-        tar -xzf android12-release.tar.gz
+        wget -q https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9/releases/download/gcc-4.9/gcc.tar.gz
+        tar -xzf gcc.tar.gz --strip-components=1
         cd ..
 
     - name: Download GCC ARM32
       run: |
         mkdir -p gcc32
         cd gcc32
-        wget -q https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9/+archive/refs/heads/android12-release.tar.gz
-        tar -xzf android12-release.tar.gz
+        wget -q https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_arm_arm-linux-androideabi-4.9/releases/download/gcc-4.9/gcc.tar.gz
+        tar -xzf gcc.tar.gz --strip-components=1
         cd ..
 
     - name: Clone kernel source
       run: |
         git clone --depth=1 -b ${{ env.KERNEL_SOURCE_BRANCH }} ${{ env.KERNEL_SOURCE }} kernel
 
-    - name: Setup KernelSU
+    - name: Setup SukiSU
       run: |
         cd kernel
-        curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
+        curl -LSs "https://raw.githubusercontent.com/SukiSU-Android-Team/KernelSU/main/kernel/setup.sh" | bash
         
-        # Enable KernelSU in defconfig
         echo "CONFIG_KSU=y" >> arch/${{ env.ARCH }}/configs/${{ env.KERNEL_CONFIG }}
         echo "CONFIG_KPROBES=y" >> arch/${{ env.ARCH }}/configs/${{ env.KERNEL_CONFIG }}
         echo "CONFIG_HAVE_KPROBES=y" >> arch/${{ env.ARCH }}/configs/${{ env.KERNEL_CONFIG }}
         echo "CONFIG_KPROBE_EVENTS=y" >> arch/${{ env.ARCH }}/configs/${{ env.KERNEL_CONFIG }}
+        echo "CONFIG_OVERLAY_FS=y" >> arch/${{ env.ARCH }}/configs/${{ env.KERNEL_CONFIG }}
 
     - name: Build kernel
       run: |
@@ -83,11 +81,14 @@ jobs:
 
     - name: Check kernel
       run: |
-        if [ -f kernel/out/arch/${{ env.ARCH }}/boot/Image ]; then
-          echo "Kernel built successfully!"
-          ls -la kernel/out/arch/${{ env.ARCH }}/boot/
+        if [ -f kernel/out/arch/${{ env.ARCH }}/boot/Image.gz-dtb ]; then
+          echo "Found Image.gz-dtb"
+          cp kernel/out/arch/${{ env.ARCH }}/boot/Image.gz-dtb kernel/out/arch/${{ env.ARCH }}/boot/Image
+        elif [ -f kernel/out/arch/${{ env.ARCH }}/boot/Image.gz ]; then
+          echo "Found Image.gz"
+          cp kernel/out/arch/${{ env.ARCH }}/boot/Image.gz kernel/out/arch/${{ env.ARCH }}/boot/Image
         else
-          echo "Kernel build failed!"
+          echo "Kernel build failed or file not found!"
           exit 1
         fi
 
@@ -95,24 +96,22 @@ jobs:
       run: |
         git clone --depth=1 https://github.com/osm0sis/AnyKernel3 AnyKernel3
         cp kernel/out/arch/${{ env.ARCH }}/boot/Image AnyKernel3/
-        if [ -f kernel/out/arch/${{ env.ARCH }}/boot/dtbo.img ]; then
-          cp kernel/out/arch/${{ env.ARCH }}/boot/dtbo.img AnyKernel3/
-        fi
+        cp kernel/out/arch/${{ env.ARCH }}/boot/dtbo.img AnyKernel3/ || true
 
     - name: Configure AnyKernel3
       run: |
         cd AnyKernel3
         sed -i 's/do.devicecheck=1/do.devicecheck=0/g' anykernel.sh
-        sed -i 's/do.modules=0/do.modules=0/g' anykernel.sh
+        sed -i 's/block=\/dev\/block\/boot/block=\/dev\/block\/by-name\/boot/g' anykernel.sh
         rm -rf .git
 
     - name: Create flashable zip
       run: |
         cd AnyKernel3
-        zip -r9 ../KernelSU-RMX3461-$(date +%Y%m%d).zip * -x .git README.md *placeholder
+        zip -r9 ../SukiSU-Q3s-$(date +%Y%m%d).zip * -x .git README.md *placeholder
 
     - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
-        name: KernelSU-RMX3461
-        path: KernelSU-RMX3461-*.zip
+        name: SukiSU-Q3s
+        path: SukiSU-Q3s-*.zip
