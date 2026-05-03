@@ -10,13 +10,14 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: 安装依赖（适配新版Ubuntu）
+      - name: 安装依赖（终极修复版）
         run: |
+          sudo dpkg --add-architecture i386
+          echo "deb http://archive.ubuntu.com/ubuntu focal main universe multiverse" | sudo tee /etc/apt/sources.list.d/focal.list
           sudo apt-get update
           sudo apt-get install -y \
             build-essential \
-            lib32ncurses6-dev \
-            lib32tinfo-dev \
+            libncurses5-dev:i386 \
             lib32z1-dev \
             bc \
             bison \
@@ -26,22 +27,20 @@ jobs:
             git \
             wget \
             curl
-          # 创建兼容软链接，模拟旧版ncurses5，解决编译脚本的依赖问题
           sudo ln -s /usr/lib32/libncurses.so.6 /usr/lib32/libncurses.so.5
           sudo ln -s /usr/lib32/libtinfo.so.6 /usr/lib32/libtinfo.so.5
 
       - name: 下载 Clang 工具链
         run: |
           git clone --depth=1 https://github.com/kdrag0n/proton-clang.git clang
-          echo "clang_dir=${GITHUB_WORKSPACE}/clang/bin" >> $GITHUB_ENV
           echo "PATH=${GITHUB_WORKSPACE}/clang/bin:${PATH}" >> $GITHUB_ENV
 
       - name: 下载 GCC ARM64/ARM32 交叉编译器
         run: |
           git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9.git gcc-arm64
           git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_arm_arm-linux-androideabi-4.9.git gcc-arm32
-          echo "GCC_ARM64=${GITHUB_WORKSPACE}/gcc-arm64/bin/aarch64-linux-android-" >> $GITHUB_ENV
-          echo "GCC_ARM32=${GITHUB_WORKSPACE}/gcc-arm32/bin/arm-linux-androideabi-" >> $GITHUB_ENV
+          echo "CROSS_COMPILE_ARM64=${GITHUB_WORKSPACE}/gcc-arm64/bin/aarch64-linux-android-" >> $GITHUB_ENV
+          echo "CROSS_COMPILE_ARM32=${GITHUB_WORKSPACE}/gcc-arm32/bin/arm-linux-androideabi-" >> $GITHUB_ENV
 
       - name: 克隆内核源码
         uses: actions/checkout@v4
@@ -53,11 +52,10 @@ jobs:
       - name: 配置 SukiSU
         run: |
           cd kernel
-          curl -LSs "https://raw.githubusercontent.com/topjohnwu/Magisk/master/scripts/boot_patch.sh" -o boot_patch.sh
-          # 这里根据你的需求添加SukiSU配置命令
+          # 这里可以替换成你自己的SukiSU配置命令
 
       - name: 构建内核
         run: |
           cd kernel
-          make -j$(nproc) ARCH=arm64 CC=clang CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- RMX3461_defconfig
-          make -j$(nproc) ARCH=arm64 CC=clang CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+          make -j$(nproc) ARCH=arm64 CC=clang CROSS_COMPILE=${CROSS_COMPILE_ARM64} CROSS_COMPILE_ARM32=${CROSS_COMPILE_ARM32} RMX3461_defconfig
+          make -j$(nproc) ARCH=arm64 CC=clang CROSS_COMPILE=${CROSS_COMPILE_ARM64} CROSS_COMPILE_ARM32=${CROSS_COMPILE_ARM32}
