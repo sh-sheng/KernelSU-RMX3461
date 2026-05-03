@@ -1,111 +1,63 @@
 name: Build SukiSU for RMX3461 (Q3s)
 
 on:
-  workflow_dispatch:
-
-env:
-  KERNEL_SOURCE: https://github.com/realme-kernel-opensource/realme_GTmaster_Q3s_Q3t_9-5G-Speed-AndroidT-kernel-source
-  KERNEL_SOURCE_BRANCH: master
-  KERNEL_CONFIG: taro_defconfig
-  ARCH: arm64
-  CLANG_URL: https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android12-release/clang-r416183b.tar.gz
-  GCC64_URL: https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/+archive/refs/heads/android12-release.tar.gz
-  GCC32_URL: https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9/+archive/refs/heads/android12-release.tar.gz
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
 
 jobs:
   build:
-    runs-on: ubuntu-latest  # 降级到Ubuntu 20.04，彻底解决依赖问题
+    runs-on: ubuntu-latest
     steps:
-    - name: Checkout
-      uses: actions/checkout@v4
+      - name: 安装依赖（适配新版Ubuntu）
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            lib32ncurses6-dev \
+            lib32tinfo-dev \
+            lib32z1-dev \
+            bc \
+            bison \
+            flex \
+            libssl-dev \
+            libelf-dev \
+            git \
+            wget \
+            curl
+          # 创建兼容软链接，模拟旧版ncurses5，解决编译脚本的依赖问题
+          sudo ln -s /usr/lib32/libncurses.so.6 /usr/lib32/libncurses.so.5
+          sudo ln -s /usr/lib32/libtinfo.so.6 /usr/lib32/libtinfo.so.5
 
-    - name: Setup build environment
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y git ccache automake flex lzop bison gperf build-essential zip curl zlib1g-dev g++-multilib libxml2-utils bzip2 libbz2-dev squashfs-tools pngcrush schedtool dpkg-dev liblz4-tool make optipng libssl-dev bc libc6-dev-i386 lib32ncurses5-dev lib32z1-dev libgl1-mesa-dev xsltproc unzip device-tree-compiler python3 python-is-python3 cpio
+      - name: 下载 Clang 工具链
+        run: |
+          git clone --depth=1 https://github.com/kdrag0n/proton-clang.git clang
+          echo "clang_dir=${GITHUB_WORKSPACE}/clang/bin" >> $GITHUB_ENV
+          echo "PATH=${GITHUB_WORKSPACE}/clang/bin:${PATH}" >> $GITHUB_ENV
 
-    - name: Download Clang
-      run: |
-        mkdir -p clang
-        cd clang
-        wget -c ${{ env.CLANG_URL }} -O clang.tar.gz
-        tar -xzf clang.tar.gz
-        cd ..
+      - name: 下载 GCC ARM64/ARM32 交叉编译器
+        run: |
+          git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9.git gcc-arm64
+          git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_arm_arm-linux-androideabi-4.9.git gcc-arm32
+          echo "GCC_ARM64=${GITHUB_WORKSPACE}/gcc-arm64/bin/aarch64-linux-android-" >> $GITHUB_ENV
+          echo "GCC_ARM32=${GITHUB_WORKSPACE}/gcc-arm32/bin/arm-linux-androideabi-" >> $GITHUB_ENV
 
-    - name: Download GCC ARM64
-      run: |
-        mkdir -p gcc64
-        cd gcc64
-        wget -c ${{ env.GCC64_URL }} -O gcc64.tar.gz
-        tar -xzf gcc64.tar.gz
-        cd ..
+      - name: 克隆内核源码
+        uses: actions/checkout@v4
+        with:
+          repository: sh-sheng/KernelSU-RMX3461
+          path: kernel
+          fetch-depth: 1
 
-    - name: Download GCC ARM32
-      run: |
-        mkdir -p gcc32
-        cd gcc32
-        wget -c ${{ env.GCC32_URL }} -O gcc32.tar.gz
-        tar -xzf gcc32.tar.gz
-        cd ..
+      - name: 配置 SukiSU
+        run: |
+          cd kernel
+          curl -LSs "https://raw.githubusercontent.com/topjohnwu/Magisk/master/scripts/boot_patch.sh" -o boot_patch.sh
+          # 这里根据你的需求添加SukiSU配置命令
 
-    - name: Clone kernel source
-      run: |
-        git clone --depth=1 -b ${{ env.KERNEL_SOURCE_BRANCH }} ${{ env.KERNEL_SOURCE }} kernel
-
-    - name: Setup SukiSU
-      run: |
-        cd kernel
-        curl -LSs "https://raw.githubusercontent.com/SukiSU-Android-Team/KernelSU/main/kernel/setup.sh" | bash
-        
-        echo "CONFIG_KSU=y" >> arch/${{ env.ARCH }}/configs/${{ env.KERNEL_CONFIG }}
-        echo "CONFIG_KPROBES=y" >> arch/${{ env.ARCH }}/configs/${{ env.KERNEL_CONFIG }}
-        echo "CONFIG_HAVE_KPROBES=y" >> arch/${{ env.ARCH }}/configs/${{ env.KERNEL_CONFIG }}
-        echo "CONFIG_KPROBE_EVENTS=y" >> arch/${{ env.ARCH }}/configs/${{ env.KERNEL_CONFIG }}
-        echo "CONFIG_OVERLAY_FS=y" >> arch/${{ env.ARCH }}/configs/${{ env.KERNEL_CONFIG }}
-
-    - name: Build kernel
-      run: |
-        cd kernel
-        export PATH="${GITHUB_WORKSPACE}/clang/bin:${GITHUB_WORKSPACE}/gcc64/bin:${GITHUB_WORKSPACE}/gcc32/bin:$PATH"
-        export ARCH=${{ env.ARCH }}
-        export SUBARCH=${{ env.ARCH }}
-        
-        make O=out ${{ env.KERNEL_CONFIG }}
-        make -j$(nproc --all) O=out \
-          ARCH=${{ env.ARCH }} \
-          CC=clang \
-          CROSS_COMPILE=aarch64-linux-android- \
-          CROSS_COMPILE_ARM32=arm-linux-androideabi- \
-          CLANG_TRIPLE=aarch64-linux-gnu- \
-          LLVM=1 \
-          LLVM_IAS=1
-
-    - name: Prepare Image
-      run: |
-        cd kernel
-        if [ -f out/arch/${{ env.ARCH }}/boot/Image.gz-dtb ]; then
-          cp out/arch/${{ env.ARCH }}/boot/Image.gz-dtb ../Image
-        elif [ -f out/arch/${{ env.ARCH }}/boot/Image.gz ]; then
-          cp out/arch/${{ env.ARCH }}/boot/Image.gz ../Image
-        else
-          echo "Kernel build failed!"
-          exit 1
-        fi
-
-    - name: Setup AnyKernel3
-      run: |
-        git clone --depth=1 https://github.com/osm0sis/AnyKernel3 AnyKernel3
-        cp Image AnyKernel3/
-        if [ -f kernel/out/arch/${{ env.ARCH }}/boot/dtbo.img ]; then
-          cp kernel/out/arch/${{ env.ARCH }}/boot/dtbo.img AnyKernel3/
-        fi
-        cd AnyKernel3
-        sed -i 's/do.devicecheck=1/do.devicecheck=0/g' anykernel.sh
-        sed -i 's/BLOCK=/BLOCK=\/dev\/block\/platform\/.*\/by-name\/boot/g' anykernel.sh
-        zip -r9 ../SukiSU-RMX3461-$(date +%Y%m%d).zip * -x .git README.md *placeholder
-
-    - name: Upload artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: SukiSU-RMX3461
-        path: SukiSU-RMX3461-*.zip
+      - name: 构建内核
+        run: |
+          cd kernel
+          make -j$(nproc) ARCH=arm64 CC=clang CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- RMX3461_defconfig
+          make -j$(nproc) ARCH=arm64 CC=clang CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi-
