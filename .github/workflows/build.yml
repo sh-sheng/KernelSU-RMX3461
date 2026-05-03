@@ -6,9 +6,8 @@ on:
 env:
   KERNEL_SOURCE: https://github.com/realme-kernel-opensource/realme_GTmaster_Q3s_Q3t_9-5G-Speed-AndroidT-kernel-source
   KERNEL_SOURCE_BRANCH: master
-  KERNEL_CONFIG: taro_defconfig  # 修正为778G的正确代号
+  KERNEL_CONFIG: taro_defconfig
   ARCH: arm64
-  CLANG_VERSION: r450784e
 
 jobs:
   build:
@@ -18,34 +17,17 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
 
-    - name: Setup build environment
+    - name: Setup build environment（彻底修复依赖）
       run: |
         sudo apt-get update
-        # 注意这里：把 python3-distutils 换成了 python3-dev，或者直接删掉 python3-distutils 也可以
-        sudo apt-get install -y git ccache automake flex lzop bison gperf build-essential zip curl zlib1g-dev g++-multilib libxml2-utils bzip2 squashfs-tools pngcrush schedtool dpkg-dev liblz4-tool make optipng maven libssl-dev pwgen libswitch-perl policycoreutils minicom libxml-sax-base-perl libxml-simple-perl bc libc6-dev-i386 lib32ncurses-dev libx11-dev lib32z1-dev libgl1-mesa-dev xsltproc unzip device-tree-compiler python3 python3-dev cpio
-    - name: Download Clang
-      run: |
-        mkdir -p clang
-        cd clang
-        wget -q https://github.com/LineageOS/android_prebuilts_clang_kernel/releases/download/clang-${{ env.CLANG_VERSION }}/clang-${{ env.CLANG_VERSION }}.tar.gz
-        tar -xzf clang-${{ env.CLANG_VERSION }}.tar.gz --strip-components=1
-        cd ..
+        sudo apt-get install -y git ccache automake flex lzop bison gperf build-essential zip curl zlib1g-dev g++-multilib libxml2-utils bzip2 squashfs-tools pngcrush schedtool dpkg-dev liblz4-tool make optipng maven libssl-dev pwgen libswitch-perl policycoreutils minicom libxml-sax-base-perl libxml-simple-perl bc libc6-dev-i386 lib32ncurses-dev libx11-dev lib32z1-dev libgl1-mesa-dev xsltproc unzip device-tree-compiler python3 python-is-python3 cpio
 
-    - name: Download GCC ARM64
-      run: |
-        mkdir -p gcc64
-        cd gcc64
-        wget -q https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9/releases/download/gcc-4.9/gcc.tar.gz
-        tar -xzf gcc.tar.gz --strip-components=1
-        cd ..
-
-    - name: Download GCC ARM32
-      run: |
-        mkdir -p gcc32
-        cd gcc32
-        wget -q https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_arm_arm-linux-androideabi-4.9/releases/download/gcc-4.9/gcc.tar.gz
-        tar -xzf gcc.tar.gz --strip-components=1
-        cd ..
+    # 改用 actions 自带的 clang 工具链，彻底告别下载失败
+    - name: Setup Clang
+      uses: KyleMayes/install-llvm-action@v1
+      with:
+        version: "18"
+        directory: ${{ github.workspace }}/clang
 
     - name: Clone kernel source
       run: |
@@ -65,7 +47,7 @@ jobs:
     - name: Build kernel
       run: |
         cd kernel
-        export PATH="${GITHUB_WORKSPACE}/clang/bin:${GITHUB_WORKSPACE}/gcc64/bin:${GITHUB_WORKSPACE}/gcc32/bin:$PATH"
+        export PATH="${GITHUB_WORKSPACE}/clang/bin:$PATH"
         export ARCH=${{ env.ARCH }}
         export SUBARCH=${{ env.ARCH }}
         
@@ -73,9 +55,8 @@ jobs:
         make -j$(nproc --all) O=out \
           ARCH=${{ env.ARCH }} \
           CC=clang \
-          CROSS_COMPILE=aarch64-linux-android- \
-          CROSS_COMPILE_ARM32=arm-linux-androideabi- \
-          CLANG_TRIPLE=aarch64-linux-gnu- \
+          CROSS_COMPILE=aarch64-linux-gnu- \
+          CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
           LLVM=1 \
           LLVM_IAS=1
 
