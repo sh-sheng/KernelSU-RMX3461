@@ -2,7 +2,6 @@ name: Build SukiSU for RMX3461 (Q3s)
 name: Build Kernel
 on:
   workflow_dispatch:
-
 env:
   # 核心配置
   KERNEL_SOURCE: https://github.com/realme-kernel/android_kernel_realme_sdm778g
