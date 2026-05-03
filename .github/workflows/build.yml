@@ -1,5 +1,5 @@
 name: Build SukiSU for RMX3461 (Q3s)
-
+name: Build Kernel
 on:
   workflow_dispatch:
 
