@@ -4,95 +4,149 @@ on:
   workflow_dispatch:
 
 env:
-  KERNEL_SOURCE: https://github.com/realme-kernel-opensource/realme_GTmaster_Q3s_Q3t_9-5G-Speed-AndroidT-kernel-source
-  KERNEL_SOURCE_BRANCH: master
+  # 核心配置
+  KERNEL_SOURCE: https://github.com/realme-kernel/android_kernel_realme_sdm778g
+  KERNEL_SOURCE_BRANCH: lineage-19.1 # 假设是 lineage 19.1 (Android 12)
   KERNEL_CONFIG: taro_defconfig
   ARCH: arm64
+
+  # 编译器版本 (适配 Android 12)
+  CLANG_VERSION: 14.0.0
+  CLANG_TAG: android13-8206544 # 或者是 r450784e
+  GCC_VERSION: 4.9
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    
+
     steps:
-    - name: Checkout
-      uses: actions/checkout@v4
+      # 1. 获取代码
+      - name: Checkout
+        uses: actions/checkout@v4
 
-    - name: Setup build environment（彻底修复依赖）
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y git ccache automake flex lzop bison gperf build-essential zip curl zlib1g-dev g++-multilib libxml2-utils bzip2 squashfs-tools pngcrush schedtool dpkg-dev liblz4-tool make optipng maven libssl-dev pwgen libswitch-perl policycoreutils minicom libxml-sax-base-perl libxml-simple-perl bc libc6-dev-i386 lib32ncurses-dev libx11-dev lib32z1-dev libgl1-mesa-dev xsltproc unzip device-tree-compiler python3 python-is-python3 cpio
+      # 2. 设置环境 (修复了 Ubuntu 24.04 的包名问题)
+      - name: Setup build environment
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            git ccache automake flex lzop bison gperf \
+            build-essential zip curl zlib1g-dev g++-multilib \
+            libxml2-utils bzip2 squashfs-tools pngcrush \
+            schedtool dpkg-dev liblz4-tool make optipng maven \
+            libssl-dev pwgen libswitch-perl policycoreutils minicom \
+            libxml-simple-perl libtext-csv-perl unzip device-tree-compiler \
+            python3 python3-pip python3-dev bc
 
-    # 改用 actions 自带的 clang 工具链，彻底告别下载失败
-    - name: Setup Clang
-      uses: KyleMayes/install-llvm-action@v1
-      with:
-        version: "18"
-        directory: ${{ github.workspace }}/clang
+      # 3. 下载 Clang (改用 wget，避开报错的 Action)
+      - name: Download Clang
+        run: |
+          mkdir -p toolchains/clang
+          cd toolchains/clang
+          echo "Downloading Clang r450784e (Android 12/13 compatible)..."
+          # 使用稳定的镜像源下载 Clang r450784e
+          wget -q --show-progress https://gitlab.com/ThankYouMario/android_prebuilts_clang-standalone/-/raw/main/clang-r450784e.tar.gz
+          tar -xzf clang-r450784e.tar.gz --strip-components=1
+          cd ../../
 
-    - name: Clone kernel source
-      run: |
-        git clone --depth=1 -b ${{ env.KERNEL_SOURCE_BRANCH }} ${{ env.KERNEL_SOURCE }} kernel
+      # 4. 下载 GCC (64位 + 32位)
+      - name: Download GCC
+        run: |
+          mkdir -p toolchains/gcc64 toolchains/gcc32
+          cd toolchains/gcc64
+          echo "Downloading GCC 64-bit..."
+          wget -q --show-progress https://gitlab.com/ThankYouMario/android_prebuilts_gcc-4.9/-/raw/main/linux-x86/aarch64/aarch64-linux-android-4.9.tar.gz
+          tar -xzf aarch64-linux-android-4.9.tar.gz --strip-components=1
+          cd ../gcc32
+          echo "Downloading GCC 32-bit..."
+          wget -q --show-progress https://gitlab.com/ThankYouMario/android_prebuilts_gcc-4.9/-/raw/main/linux-x86/arm/arm-linux-androideabi-4.9.tar.gz
+          tar -xzf arm-linux-androideabi-4.9.tar.gz --strip-components=1
+          cd ../../
 
-    - name: Setup SukiSU
-      run: |
-        cd kernel
-        curl -LSs "https://raw.githubusercontent.com/SukiSU-Android-Team/KernelSU/main/kernel/setup.sh" | bash
-        
-        echo "CONFIG_KSU=y" >> arch/${{ env.ARCH }}/configs/${{ env.KERNEL_CONFIG }}
-        echo "CONFIG_KPROBES=y" >> arch/${{ env.ARCH }}/configs/${{ env.KERNEL_CONFIG }}
-        echo "CONFIG_HAVE_KPROBES=y" >> arch/${{ env.ARCH }}/configs/${{ env.KERNEL_CONFIG }}
-        echo "CONFIG_KPROBE_EVENTS=y" >> arch/${{ env.ARCH }}/configs/${{ env.KERNEL_CONFIG }}
-        echo "CONFIG_OVERLAY_FS=y" >> arch/${{ env.ARCH }}/configs/${{ env.KERNEL_CONFIG }}
+      # 5. 克隆内核源码
+      - name: Clone kernel source
+        run: |
+          git clone --depth=1 --recursive ${{ env.KERNEL_SOURCE }} kernel -b ${{ env.KERNEL_SOURCE_BRANCH }}
 
-    - name: Build kernel
-      run: |
-        cd kernel
-        export PATH="${GITHUB_WORKSPACE}/clang/bin:$PATH"
-        export ARCH=${{ env.ARCH }}
-        export SUBARCH=${{ env.ARCH }}
-        
-        make O=out ${{ env.KERNEL_CONFIG }}
-        make -j$(nproc --all) O=out \
-          ARCH=${{ env.ARCH }} \
-          CC=clang \
-          CROSS_COMPILE=aarch64-linux-gnu- \
-          CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
-          LLVM=1 \
-          LLVM_IAS=1
+      # 6. 设置 SukiSU (假设你在根目录放了 SukiSU 的源码或者需要 clone)
+      # 注意：这里假设你仓库里有一个叫 SukiSU 的文件夹，或者你需要 clone 它
+      # 如果是子模块或者其他方式，请调整这里。这里演示 clone 一个通用的 SukiSU
+      - name: Setup SukiSU
+        run: |
+          git clone --recursive --depth=1 https://github.com/5ec1cff/SukiSU SukiSU
+          # 把 SukiSU 源码复制到内核目录的 drivers 下面 (具体路径视内核而定)
+          # 这一步非常关键，取决于你的内核结构。通常放在 drivers/ 下
+          cp -rf SukiSU kernel/drivers/
 
-    - name: Check kernel
-      run: |
-        if [ -f kernel/out/arch/${{ env.ARCH }}/boot/Image.gz-dtb ]; then
-          echo "Found Image.gz-dtb"
-          cp kernel/out/arch/${{ env.ARCH }}/boot/Image.gz-dtb kernel/out/arch/${{ env.ARCH }}/boot/Image
-        elif [ -f kernel/out/arch/${{ env.ARCH }}/boot/Image.gz ]; then
-          echo "Found Image.gz"
-          cp kernel/out/arch/${{ env.ARCH }}/boot/Image.gz kernel/out/arch/${{ env.ARCH }}/boot/Image
-        else
-          echo "Kernel build failed or file not found!"
-          exit 1
-        fi
+      # 7. 编译内核
+      - name: Build kernel
+        run: |
+          cd kernel
 
-    - name: Setup AnyKernel3
-      run: |
-        git clone --depth=1 https://github.com/osm0sis/AnyKernel3 AnyKernel3
-        cp kernel/out/arch/${{ env.ARCH }}/boot/Image AnyKernel3/
-        cp kernel/out/arch/${{ env.ARCH }}/boot/dtbo.img AnyKernel3/ || true
+          # 设置环境变量
+          export PATH=$(pwd)/../toolchains/clang/bin:$(pwd)/../toolchains/gcc64/bin:$(pwd)/../toolchains/gcc32/bin:$PATH
+          export ARCH=${{ env.ARCH }}
+          export SUBARCH=arm64
 
-    - name: Configure AnyKernel3
-      run: |
-        cd AnyKernel3
-        sed -i 's/do.devicecheck=1/do.devicecheck=0/g' anykernel.sh
-        sed -i 's/block=\/dev\/block\/boot/block=\/dev\/block\/by-name\/boot/g' anykernel.sh
-        rm -rf .git
+          # 设置交叉编译器
+          export CROSS_COMPILE=../toolchains/gcc64/bin/aarch64-linux-android-
+          export CROSS_COMPILE_ARM32=../toolchains/gcc32/bin/arm-linux-androideabi-
+          export CC=../toolchains/clang/bin/clang
 
-    - name: Create flashable zip
-      run: |
-        cd AnyKernel3
-        zip -r9 ../SukiSU-Q3s-$(date +%Y%m%d).zip * -x .git README.md *placeholder
+          # 启用 LTO (可选，加速编译)
+          # export LD=../toolchains/clang/bin/ld.lld
+          # export AR=../toolchains/clang/bin/llvm-ar
+          # export NM=../toolchains/clang/bin/llvm-nm
+          # export OBJCOPY=../toolchains/clang/bin/llvm-objcopy
+          # export OBJDUMP=../toolchains/clang/bin/llvm-objdump
+          # export READELF=../toolchains/clang/bin/llvm-readelf
+          # export STRIP=../toolchains/clang/bin/llvm-strip
 
-    - name: Upload artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: SukiSU-Q3s
-        path: SukiSU-Q3s-*.zip
+          # 开始编译
+          make -j$(nproc --all) O=out ${{ env.KERNEL_CONFIG }}
+          make -j$(nproc --all) O=out \
+              CLANG_TRIPLE=aarch64-linux-gnu- \
+              LLVM=1 \
+              LLVM_IAS=1
+
+      # 8. 检查并准备镜像
+      - name: Check kernel
+        run: |
+          cd kernel
+          if [ -f out/arch/arm64/boot/Image.gz-dtb ]; then
+            echo "Found Image.gz-dtb"
+            cp out/arch/arm64/boot/Image.gz-dtb ../Image
+          elif [ -f out/arch/arm64/boot/Image.gz ]; then
+            echo "Found Image.gz"
+            cp out/arch/arm64/boot/Image.gz ../Image
+          else
+            echo "Kernel build failed! Image not found."
+            exit 1
+          fi
+
+      # 9. 设置 AnyKernel3
+      - name: Setup AnyKernel3
+        run: |
+          git clone --depth=1 https://github.com/osm0sis/AnyKernel3
+          # 复制刚才编译好的内核镜像进去
+          cp Image AnyKernel3/
+          cd AnyKernel3
+
+          # 针对 Realme Q3s (Taro) 修改刷机脚本
+          # 这里的 sed 命令用于自动替换分区路径，防止刷机报错
+          # 注意：Realme 机型通常是 boot_a 和 boot_b，或者直接用 /dev/block/by-name/boot
+          sed -i 's/block=\/dev\/block\/by-name\/boot;/block=\/dev\/block\/by-name\/boot;/' anykernel.sh
+          # 如果你有 dtbo 需要刷入，也可以在这里添加逻辑
+
+      # 10. 打包
+      - name: Create flashable zip
+        run: |
+          cd AnyKernel3
+          ZIPNAME="SukiSU-Q3s-$(date +%Y%m%d).zip"
+          zip -r9 ../$ZIPNAME . -x .git README.md
+
+      # 11. 上传成果
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ github.workspace }}/AnyKernel3/*.zip
+          path: *.zip
