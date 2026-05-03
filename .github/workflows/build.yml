@@ -14,7 +14,7 @@ env:
 
 jobs:
   build:
-    runs-on: ubuntu-20.04  # 降级到Ubuntu 20.04，彻底解决依赖问题
+    runs-on: ubuntu-latest  # 降级到Ubuntu 20.04，彻底解决依赖问题
     steps:
     - name: Checkout
       uses: actions/checkout@v4
